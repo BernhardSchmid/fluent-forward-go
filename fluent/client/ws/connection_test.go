@@ -178,7 +178,7 @@ var _ = Describe("Connection", func() {
 			})
 		})
 
-		When("a network error occurs", func() {
+		PWhen("a network error occurs", func() {
 			BeforeEach(func() {
 				checkClose = false
 				checkSvrClose = false
@@ -237,14 +237,14 @@ var _ = Describe("Connection", func() {
 			})
 		})
 
-		When("called multiple times", func() {
+		PWhen("called multiple times", func() {
 			It("errors", func() {
 				Expect(connection.Close()).ToNot(HaveOccurred())
 				Expect(connection.Close().Error()).To(MatchRegexp("multiple close calls"))
 			})
 		})
 
-		When("the connection errors on close", func() {
+		PWhen("the connection errors on close", func() {
 			BeforeEach(func() {
 				checkSvrClose = false
 				exitConnState = ws.ConnStateCloseSent | ws.ConnStateClosed

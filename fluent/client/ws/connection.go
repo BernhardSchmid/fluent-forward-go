@@ -64,6 +64,7 @@ type connection struct {
 	closedSig     chan struct{}
 	connState     ConnState
 	closeDeadline time.Duration
+	sync          *synchronize
 }
 
 func NewConnection(conn ext.Conn, opts ConnectionOptions) (Connection, error) {
@@ -72,6 +73,15 @@ func NewConnection(conn ext.Conn, opts ConnectionOptions) (Connection, error) {
 		closedSig: make(chan struct{}),
 		connState: ConnStateOpen,
 	}
+
+	sync, err := NewSynchronize(
+		func() { wsc.stateLock.Lock() },
+		func() { wsc.stateLock.Unlock() },
+	)
+	if err != nil {
+		return nil, err
+	}
+	wsc.sync = sync
 
 	if opts.CloseHandler == nil {
 		opts.CloseHandler = wsc.handleClose
@@ -126,15 +136,15 @@ func (wsc *connection) ConnState() ConnState {
 }
 
 func (wsc *connection) hasConnState(cs ConnState) bool {
-	wsc.stateLock.RLock()
-	defer wsc.stateLock.RUnlock()
+	// wsc.stateLock.RLock()
+	// defer wsc.stateLock.RUnlock()
 
 	return wsc.connState&cs != 0
 }
 
 func (wsc *connection) hasAnyConnState(cs ...ConnState) bool {
-	wsc.stateLock.RLock()
-	defer wsc.stateLock.RUnlock()
+	// wsc.stateLock.RLock()
+	// defer wsc.stateLock.RUnlock()
 
 	for i := 0; i < len(cs); i++ {
 		if wsc.connState&cs[i] != 0 {
@@ -146,8 +156,8 @@ func (wsc *connection) hasAnyConnState(cs ...ConnState) bool {
 }
 
 func (wsc *connection) setConnState(cs ConnState) {
-	wsc.stateLock.Lock()
-	defer wsc.stateLock.Unlock()
+	// wsc.stateLock.Lock()
+	// defer wsc.stateLock.Unlock()
 
 	wsc.connState |= cs
 }
@@ -157,30 +167,38 @@ func (wsc *connection) unsetConnState(cs ConnState) {
 		return
 	}
 
-	wsc.stateLock.Lock()
-	defer wsc.stateLock.Unlock()
+	// wsc.stateLock.Lock()
+	// defer wsc.stateLock.Unlock()
 
 	wsc.connState ^= cs
 }
 
 // CloseWithMsg sends a close message to the peer
 func (wsc *connection) CloseWithMsg(closeCode int, msg string) error {
-	if wsc.hasConnState(ConnStateCloseSent) {
-		return errors.New("multiple close calls")
-	}
 
-	wsc.unsetConnState(ConnStateOpen)
+	var match bool
+	err := wsc.sync.Run(func() error {
+		if wsc.hasConnState(ConnStateCloseSent) {
+			return errors.New("multiple close calls")
+		}
 
-	err := wsc.WriteMessage(
-		websocket.CloseMessage,
-		websocket.FormatCloseMessage(
-			closeCode, msg,
-		),
-	)
+		wsc.unsetConnState(ConnStateOpen)
 
-	wsc.setConnState(ConnStateCloseSent)
+		err := wsc.WriteMessage(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(
+				closeCode, msg,
+			),
+		)
 
-	if err == nil && wsc.hasConnState(ConnStateListening) && !wsc.hasConnState(ConnStateCloseReceived) {
+		wsc.setConnState(ConnStateCloseSent)
+
+		match = wsc.hasConnState(ConnStateListening) && !wsc.hasConnState(ConnStateCloseReceived)
+
+		return err
+	})
+
+	if err == nil && match {
 		select {
 		case <-time.After(wsc.closeDeadline):
 			// sent a close, but never heard back, close anyway
@@ -189,9 +207,12 @@ func (wsc *connection) CloseWithMsg(closeCode int, msg string) error {
 		}
 	}
 
-	wsc.setConnState(ConnStateClosed)
+	cerr := wsc.sync.Run(func() error {
+		wsc.setConnState(ConnStateClosed)
+		return wsc.Conn.Close()
+	})
 
-	if cerr := wsc.Conn.Close(); cerr != nil {
+	if cerr != nil {
 		err = cerr
 	}
 
@@ -207,14 +228,19 @@ func (wsc *connection) Closed() bool {
 }
 
 func (wsc *connection) handleClose(_ Connection, code int, text string) error {
-	wsc.setConnState(ConnStateCloseReceived)
+	var closeSent bool
+	wsc.sync.Run(func() error {
+		wsc.setConnState(ConnStateCloseReceived)
+		closeSent = wsc.hasConnState(ConnStateCloseSent)
+		return nil
+	})
 
 	var err error
 
 	// If the peer initiated the close, then this client must send a message
 	// confirming receipt. If this client sent the initial close message, then
 	// the closing handshake is complete and no further action is required.
-	if !wsc.hasConnState(ConnStateCloseSent) {
+	if !closeSent {
 		// respond with close
 		err = wsc.Close()
 	}
@@ -229,11 +255,17 @@ type connMsg struct {
 }
 
 func (wsc *connection) Listen() error {
-	if wsc.hasConnState(ConnStateListening) {
-		return errors.New("already listening on this connection")
-	}
 
-	wsc.setConnState(ConnStateListening)
+	if err := wsc.sync.Run(func() error {
+		if wsc.hasConnState(ConnStateListening) {
+			return errors.New("already listening on this connection")
+		}
+
+		wsc.setConnState(ConnStateListening)
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	nextMsg := make(chan connMsg)
 
@@ -248,19 +280,30 @@ func (wsc *connection) Listen() error {
 		for {
 			msg.mt, msg.message, msg.err = wsc.Conn.ReadMessage()
 
-			if wsc.hasConnState(ConnStateClosed) && errors.Is(msg.err, net.ErrClosed) {
-				// "healthy" close
-				break
-			}
+			var shouldBreak bool
+			wsc.sync.Run(func() error {
+				if wsc.hasConnState(ConnStateClosed) && errors.Is(msg.err, net.ErrClosed) {
+					// "healthy" close
+					shouldBreak = true
+					return nil
+				}
 
-			nextMsg <- msg
+				nextMsg <- msg
 
-			// exit on network errors
-			if _, ok := msg.err.(net.Error); ok || errors.Is(msg.err, net.ErrClosed) {
-				break
-			}
+				// exit on network errors
+				if _, ok := msg.err.(net.Error); ok || errors.Is(msg.err, net.ErrClosed) {
+					shouldBreak = true
+					return nil
+				}
 
-			if wsc.hasAnyConnState(ConnStateCloseReceived, ConnStateClosed) {
+				if wsc.hasAnyConnState(ConnStateCloseReceived, ConnStateClosed) {
+					shouldBreak = true
+					return nil
+				}
+				return nil
+			})
+
+			if shouldBreak {
 				break
 			}
 		}
