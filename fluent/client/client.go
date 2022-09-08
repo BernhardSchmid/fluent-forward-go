@@ -301,7 +301,7 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 // SendRaw sends bytes across the wire. If the session
 // is not yet in transport phase, an error is returned,
 // and no message is sent.
-func (c *Client) SendRaw(m []byte) error {
+func (c *Client) SendRaw(bytesToWrite []byte) error {
 	c.sessionLock.RLock()
 	defer c.sessionLock.RUnlock()
 
@@ -313,9 +313,36 @@ func (c *Client) SendRaw(m []byte) error {
 		return errors.New("session handshake not completed")
 	}
 
-	_, err := c.session.Connection.Write(m)
+	const maxAttempts = 3
+	var offset int = 0
+	var attempts int = 0
+	for attempts < maxAttempts {
+		c.session.Connection.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		writtenBytes, err := c.session.Connection.Write(bytesToWrite[offset:])
+		if err != nil {
+			return err
+		}
 
-	return err
+		if writtenBytes == 0 {
+			time.Sleep(time.Millisecond * 25)
+			attempts++
+		} else {
+			attempts = 0
+		}
+
+		offset += writtenBytes
+
+		if offset >= len(bytesToWrite) {
+			break
+		}
+
+	}
+
+	if attempts >= maxAttempts {
+		return fmt.Errorf("failed to write entire block, %d bytes written out of %d", offset, len(bytesToWrite))
+	}
+
+	return nil
 }
 
 func (c *Client) SendPacked(tag string, entries protocol.EntryList) error {
