@@ -27,9 +27,7 @@ package client
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
-	"syscall"
 
 	"crypto/rand"
 	"net"
@@ -407,15 +405,12 @@ func debug_tailSocket(c net.Conn) {
 			buffer = buffer[0:0]
 			bytes, err := c.Read(buffer)
 			if err != nil {
-				fmt.Printf("error reading from fluentbit connection. %#v\n", err)
-				if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || strings.Contains(err.Error(), "on closed pipe") {
-					fmt.Printf("read from fluentbit: leaving function ...\n")
-					return
-				}
+				fmt.Printf("error reading from fluentbit connection - closing go observing function. %#v\n", err)
+				return
 			}
 
 			if bytes > 0 {
-				fmt.Printf("data returned from fluentbit: %d\n%v\n%s\n", bytes, buffer, string(bytes))
+				fmt.Printf("data returned from fluentbit: %d\n%v\n%s\n", bytes, buffer, string(buffer))
 			} else {
 				fmt.Printf("info: read from fluentbit returned without error and data\n")
 			}
