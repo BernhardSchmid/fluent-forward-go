@@ -27,7 +27,9 @@ package client
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
+	"syscall"
 
 	"crypto/rand"
 	"net"
@@ -142,6 +144,7 @@ func (c *Client) connect() error {
 	// If no shared key, handshake mode is not required
 	if c.AuthInfo.SharedKey == nil {
 		c.session.TransportPhase = true
+		debug_tailSocket(c.session.Connection) // TODO: debug code, remove for production
 	}
 
 	return nil
@@ -199,6 +202,7 @@ func (c *Client) Handshake() error {
 	}
 
 	c.session.TransportPhase = true
+	debug_tailSocket(c.session.Connection) // TODO: debug code, remove for production
 
 	return nil
 }
@@ -394,4 +398,27 @@ func (c *Client) SendCompressedFromBytes(tag string, entries []byte) error {
 	}
 
 	return err
+}
+
+func debug_tailSocket(c net.Conn) {
+	go func() {
+		var buffer = make([]byte, 1024*1024)
+		for {
+			buffer = buffer[0:0]
+			bytes, err := c.Read(buffer)
+			if err != nil {
+				fmt.Printf("error reading from fluentbit connection. %#v\n", err)
+				if errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ECONNRESET) || strings.Contains(err.Error(), "on closed pipe") {
+					fmt.Printf("read from fluentbit: leaving function ...\n")
+					return
+				}
+			}
+
+			if bytes > 0 {
+				fmt.Printf("data returned from fluentbit: %d\n%v\n%s\n", bytes, buffer, string(bytes))
+			} else {
+				fmt.Printf("info: read from fluentbit returned without error and data\n")
+			}
+		}
+	}()
 }
