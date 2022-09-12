@@ -402,7 +402,6 @@ func debug_tailSocket(c net.Conn) {
 	go func() {
 		var buffer = make([]byte, 1024*1024)
 		for {
-			buffer = buffer[0:0]
 			bytes, err := c.Read(buffer)
 			if err != nil {
 				fmt.Printf("error reading from fluentbit connection - closing go observing function. %#v\n", err)
@@ -410,7 +409,11 @@ func debug_tailSocket(c net.Conn) {
 			}
 
 			if bytes > 0 {
-				fmt.Printf("data returned from fluentbit: %d\n%v\n%s\n", bytes, buffer, string(buffer))
+				var limit = bytes
+				if limit > 20 {
+					limit = 20
+				}
+				fmt.Printf("data returned from fluentbit: %d\n%v\n%s\n", bytes, buffer[0:limit], string(buffer[0:limit]))
 			} else {
 				fmt.Printf("info: read from fluentbit returned without error and data\n")
 			}
