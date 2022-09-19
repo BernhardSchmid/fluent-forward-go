@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
@@ -190,8 +191,10 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 	}
 
 	var (
-		chunk string
-		err   error
+		chunk      string
+		err        error
+		rawMsgData bytes.Buffer
+		written    int
 	)
 
 	if c.RequireAck {
@@ -203,10 +206,20 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 		defer c.ackLock.Unlock()
 	}
 
-	err = msgp.Encode(c.session.Connection, e)
+	// TODO test write to buffer before sending # Issue #778
+	err = msgp.Encode(&rawMsgData, e)
+	if err != nil {
+		return err
+	}
+
+	written, err = c.session.Connection.Write(rawMsgData.Bytes())
+	// err = msgp.Encode(c.session.Connection, e)
 	if err != nil || !c.RequireAck {
 		return err
 	}
+
+	// TODO
+	_ = written
 
 	return c.checkAck(chunk)
 }
