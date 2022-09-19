@@ -212,11 +212,25 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 		return err
 	}
 
-	written, err = c.session.Connection.Write(rawMsgData.Bytes())
+	// TODO: unmarshal right here to check integritiy
+	bytesData := rawMsgData.Bytes()
+
+	written, err = c.session.Connection.Write(bytesData)
 	// err = msgp.Encode(c.session.Connection, e)
 	if err != nil || !c.RequireAck {
 		return err
 	}
+
+	go func() {
+		// TODO: unmarshal right here to check integritiy
+		pfm := &protocol.PackedForwardMessage{}
+		errDecoding := msgp.Decode(bytes.NewBuffer(bytesData), pfm)
+
+		if errDecoding != nil {
+			fmt.Printf("unable to decode the the encoded msgpack. %#v\n", errDecoding.Error())
+		}
+		fmt.Printf("payload successfully decoded\n")
+	}()
 
 	// TODO
 	_ = written
