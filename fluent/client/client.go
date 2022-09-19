@@ -217,9 +217,6 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 
 	written, err = c.session.Connection.Write(bytesData)
 	// err = msgp.Encode(c.session.Connection, e)
-	if err != nil || !c.RequireAck {
-		return err
-	}
 
 	go func() {
 		// TODO: unmarshal right here to check integritiy
@@ -232,6 +229,10 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 		}
 		fmt.Printf("payload successfully decoded\n")
 	}()
+
+	if err != nil || !c.RequireAck {
+		return err
+	}
 
 	// TODO
 	_ = written
