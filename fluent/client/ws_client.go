@@ -247,7 +247,7 @@ func (c *WSClient) Send(e protocol.ChunkEncoder) error {
 	var (
 		err        error
 		rawMsgData bytes.Buffer
-		//written    int
+		written    int
 	)
 
 	// Check for an async connection error and return it here.
@@ -274,7 +274,7 @@ func (c *WSClient) Send(e protocol.ChunkEncoder) error {
 
 	// msgp.Encode makes use of object pool to decrease allocations
 	// return msgp.Encode(session.Connection, e)
-	// written, err = c.session.Connection.Write(bytesData)
+	written, err = c.session.Connection.Write(bytesData)
 
 	// TODO - Debug code - REMOVE!!!
 	go func() {
@@ -288,10 +288,10 @@ func (c *WSClient) Send(e protocol.ChunkEncoder) error {
 	}()
 
 	// TODO
-	//_ = written
+	_ = written
 
-	// return err
-	return msgp.Encode(session.Connection, e)
+	return err
+	// return msgp.Encode(session.Connection, e)
 }
 
 // SendRaw sends an array of bytes across the wire.
