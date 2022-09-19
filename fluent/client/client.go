@@ -224,6 +224,7 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 	go func() {
 		// TODO: unmarshal right here to check integritiy
 		pfm := &protocol.PackedForwardMessage{}
+		fmt.Printf("start msgpack validation by decoding ...\n")
 		errDecoding := msgp.Decode(bytes.NewBuffer(bytesData), pfm)
 
 		if errDecoding != nil {
