@@ -179,6 +179,7 @@ func (c *Client) checkAck(chunk string) error {
 // Send sends a single protocol.ChunkEncoder across the wire.  If the session
 // is not yet in transport phase, an error is returned, and no message is sent.
 func (c *Client) Send(e protocol.ChunkEncoder) error {
+	fmt.Printf("enter *Client.Send() ...\n")
 	c.sessionLock.RLock()
 	defer c.sessionLock.RUnlock()
 
@@ -219,9 +220,9 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 	// err = msgp.Encode(c.session.Connection, e)
 
 	go func() {
+		fmt.Printf("start msgpack validation by decoding ...\n")
 		// TODO: unmarshal right here to check integritiy
 		pfm := &protocol.PackedForwardMessage{}
-		fmt.Printf("start msgpack validation by decoding ...\n")
 		errDecoding := msgp.Decode(bytes.NewBuffer(bytesData), pfm)
 
 		if errDecoding != nil {
@@ -229,6 +230,7 @@ func (c *Client) Send(e protocol.ChunkEncoder) error {
 		}
 		fmt.Printf("payload successfully decoded\n")
 	}()
+	time.Sleep(time.Millisecond * 10)
 
 	if err != nil || !c.RequireAck {
 		return err
